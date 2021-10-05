@@ -1,0 +1,15 @@
+<h1>Settings</h1>
+
+<h3>Change e-mail</h3>
+
+<%= live_component @socket, MfaExampleWeb.UserSettingsLive.ChangeEmailComponent,
+  id: :change_email,
+  current_user: @current_user
+%>
+
+<h3>Change password</h3>
+
+<%= live_component @socket, MfaExampleWeb.UserSettingsLive.ChangePasswordComponent,
+  id: :change_password,
+  current_user: @current_user
+%>

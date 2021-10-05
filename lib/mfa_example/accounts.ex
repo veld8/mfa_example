@@ -104,8 +104,11 @@ defmodule MfaExample.Accounts do
       %Ecto.Changeset{data: %User{}}
 
   """
-  def change_user_email(user, attrs \\ %{}) do
-    User.email_changeset(user, attrs)
+  def change_user_email(user, current_password \\ nil, attrs \\ %{}) do
+    user
+    |> User.email_changeset(attrs)
+    |> User.validate_current_password(current_password)
+    |> attach_action_if_current_password(current_password)
   end
 
   @doc """
@@ -180,8 +183,11 @@ defmodule MfaExample.Accounts do
       %Ecto.Changeset{data: %User{}}
 
   """
-  def change_user_password(user, attrs \\ %{}) do
-    User.password_changeset(user, attrs, hash_password: false)
+  def change_user_password(user, current_password \\ nil, attrs \\ %{}) do
+    user
+    |> User.password_changeset(attrs, hash_password: false)
+    |> User.validate_current_password(current_password)
+    |> attach_action_if_current_password(current_password)
   end
 
   @doc """
@@ -211,6 +217,30 @@ defmodule MfaExample.Accounts do
       {:error, :user, changeset, _} -> {:error, changeset}
     end
   end
+
+  @doc """
+  Applies update action for changing user password.
+
+  ## Examples
+
+      iex> apply_user_password(user, valid_current_password, %{password: "new long password", password_confirmation: "new long password"})
+      {:ok, %User{}}
+
+      iex> apply_user_password(user, invalid_current_password, %{password: "valid", password_confirmation: "not the same"})
+      {:error, %Ecto.Changeset{}}
+  """
+  def apply_user_password(user, password, attrs) do
+    user
+    |> User.password_changeset(attrs)
+    |> User.validate_current_password(password)
+    |> Ecto.Changeset.apply_action(:update)
+  end
+
+  defp attach_action_if_current_password(changeset, nil),
+    do: changeset
+
+  defp attach_action_if_current_password(changeset, _),
+    do: Map.replace!(changeset, :action, :validate)
 
   ## Session
 

@@ -242,15 +242,9 @@ defmodule MfaExample.AccountsTest do
       assert changeset.required == [:password]
     end
 
-    test "allows fields to be set" do
-      changeset =
-        Accounts.change_user_password(%User{}, %{
-          "password" => "new valid password"
-        })
-
-      assert changeset.valid?
-      assert get_change(changeset, :password) == "new valid password"
-      assert is_nil(get_change(changeset, :hashed_password))
+    test "validates the current password" do
+      assert %Ecto.Changeset{} = changeset = Accounts.change_user_password(%User{}, "bad")
+      assert %{current_password: ["is not valid"]} = errors_on(changeset)
     end
   end
 
