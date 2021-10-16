@@ -34,7 +34,55 @@ defmodule MfaExample.Accounts.UserTOTP do
     end
   end
 
-  defp valid_totp?(totp, code) do
+  def valid_totp?(totp, code) do
     is_binary(code) and byte_size(code) == 6 and NimbleTOTP.valid?(totp.secret, code)
+  end
+
+  def validate_backup_code(totp, code) when is_binary(code) do
+    totp.backup_codes
+    |> Enum.map_reduce(false, fn backup, valid? ->
+      if Plug.Crypto.secure_compare(backup.code, code) and is_nil(backup.used_at) do
+        {Ecto.Changeset.change(backup, %{used_at: DateTime.utc_now()}), true}
+      else
+        {backup, valid?}
+      end
+    end)
+    |> case do
+      {backup_codes, true} ->
+        totp
+        |> Ecto.Changeset.change()
+        |> Ecto.Changeset.put_embed(:backup_codes, backup_codes)
+
+      {_, false} ->
+        nil
+    end
+  end
+
+  def validate_backup_code(_totp, _code), do: nil
+
+  def regenerate_backup_codes(changeset) do
+    Ecto.Changeset.put_embed(changeset, :backup_codes, generate_backup_codes())
+  end
+
+  def ensure_backup_codes(changeset) do
+    case Ecto.Changeset.get_field(changeset, :backup_codes) do
+      [] -> regenerate_backup_codes(changeset)
+      _ -> changeset
+    end
+  end
+
+  defp generate_backup_codes do
+    for letter <- Enum.take_random(?A..?Z, 10) do
+      suffix =
+        :crypto.strong_rand_bytes(5)
+        |> Base.encode32()
+        |> binary_part(0, 7)
+
+      # The first digit is always a letter so we can distinguish
+      # in the UI between 6 digit TOTP codes and backup ones.
+      # We also replace the letter O by X to avoid confusion with zero.
+      code = String.replace(<<letter, suffix::binary>>, "O", "X")
+      %MfaExample.Accounts.UserTOTP.BackupCode{code: code}
+    end
   end
 end

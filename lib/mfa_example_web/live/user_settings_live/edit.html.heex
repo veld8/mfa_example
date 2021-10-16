@@ -13,3 +13,8 @@
   id: :change_password,
   current_user: @current_user
 %>
+
+<%= live_component @socket, MfaExampleWeb.UserSettingsLive.TOTPComponent,
+  id: :totp,
+  current_user: @current_user
+%>
