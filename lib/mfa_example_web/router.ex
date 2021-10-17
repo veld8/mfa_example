@@ -74,9 +74,12 @@ defmodule MfaExampleWeb.Router do
   scope "/", MfaExampleWeb do
     pipe_through [:browser, :require_authenticated_user]
 
-    get "/users/settings", UserSettingsController, :edit
-    put "/users/settings", UserSettingsController, :update
+    get "/users/totp", UserTOTPController, :new
+    post "/users/totp", UserTOTPController, :create
+
+    live "/users/settings", UserSettingsLive.Edit, :edit, as: :user_settings
     get "/users/settings/confirm_email/:token", UserSettingsController, :confirm_email
+    put "/users/settings/update_password", UserSettingsController, :update_password
   end
 
   scope "/", MfaExampleWeb do

@@ -21,7 +21,6 @@ defmodule MfaExampleWeb.UserAuthTest do
       conn = UserAuth.log_in_user(conn, user)
       assert token = get_session(conn, :user_token)
       assert get_session(conn, :live_socket_id) == "users_sessions:#{Base.url_encode64(token)}"
-      assert redirected_to(conn) == "/"
       assert Accounts.get_user_by_session_token(token)
     end
 
@@ -29,14 +28,31 @@ defmodule MfaExampleWeb.UserAuthTest do
       conn = conn |> put_session(:to_be_removed, "value") |> UserAuth.log_in_user(user)
       refute get_session(conn, :to_be_removed)
     end
+  end
 
-    test "redirects to the configured path", %{conn: conn, user: user} do
-      conn = conn |> put_session(:user_return_to, "/hello") |> UserAuth.log_in_user(user)
-      assert redirected_to(conn) == "/hello"
+  describe "redirect_user_after_login_with_remember_me/2" do
+    test "redirects home by default", %{conn: conn} do
+      assert conn
+             |> UserAuth.redirect_user_after_login_with_remember_me()
+             |> redirected_to() == Routes.page_path(conn, :index)
     end
 
-    test "writes a cookie if remember_me is configured", %{conn: conn, user: user} do
-      conn = conn |> fetch_cookies() |> UserAuth.log_in_user(user, %{"remember_me" => "true"})
+    test "redirects to the configured path", %{conn: conn} do
+      conn =
+        conn
+        |> put_session(:user_return_to, "/hello")
+        |> UserAuth.redirect_user_after_login_with_remember_me()
+
+      assert redirected_to(conn) == "/hello"
+      refute get_session(conn, :user_return_to)
+    end
+
+    test "writes a cookie if remember_me is configured", %{conn: conn} do
+      conn =
+        conn
+        |> fetch_cookies()
+        |> UserAuth.redirect_user_after_login_with_remember_me(%{"remember_me" => "true"})
+
       assert get_session(conn, :user_token) == conn.cookies[@remember_me_cookie]
 
       assert %{value: signed_token, max_age: max_age} = conn.resp_cookies[@remember_me_cookie]
@@ -91,7 +107,10 @@ defmodule MfaExampleWeb.UserAuthTest do
 
     test "authenticates user from cookies", %{conn: conn, user: user} do
       logged_in_conn =
-        conn |> fetch_cookies() |> UserAuth.log_in_user(user, %{"remember_me" => "true"})
+        conn
+        |> fetch_cookies()
+        |> UserAuth.log_in_user(user)
+        |> UserAuth.redirect_user_after_login_with_remember_me(%{"remember_me" => "true"})
 
       user_token = logged_in_conn.cookies[@remember_me_cookie]
       %{value: signed_token} = logged_in_conn.resp_cookies[@remember_me_cookie]

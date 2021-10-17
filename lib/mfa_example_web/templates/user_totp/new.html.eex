@@ -1,0 +1,25 @@
+<%= if @error_message do %>
+  <div class="alert alert-danger">
+    <div><%= @error_message %></div>
+  </div>
+<% end %>
+
+<div class="text-center">
+  <h4>Two-factor authentication</h4>
+  <p>Enter the six-digit code from your device or any of your eight-character backup codes to finish logging in.</p>
+</div>
+
+<%= form_for @conn, Routes.user_totp_path(@conn, :create), [as: :user], fn f -> %>
+  <div>
+    <%= label f, :code %>
+    <%= text_input f, :code, required: true %>
+
+    <%= label f, :remember_me, "Keep me logged in for 60 days" %>
+    <%= checkbox f, :remember_me %>
+  </div>
+
+  <div class="text-center">
+    <%= submit "Verify code and log in" %>
+    <p>or <%= link "click here to logout", to: Routes.user_session_path(@conn, :delete), method: :delete%>.</p>
+  </div>
+<% end %>

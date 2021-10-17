@@ -4,7 +4,7 @@ defmodule MfaExample.AccountsTest do
   alias MfaExample.Accounts
 
   import MfaExample.AccountsFixtures
-  alias MfaExample.Accounts.{User, UserToken}
+  alias MfaExample.Accounts.{User, UserToken, UserTOTP}
 
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
@@ -242,15 +242,9 @@ defmodule MfaExample.AccountsTest do
       assert changeset.required == [:password]
     end
 
-    test "allows fields to be set" do
-      changeset =
-        Accounts.change_user_password(%User{}, %{
-          "password" => "new valid password"
-        })
-
-      assert changeset.valid?
-      assert get_change(changeset, :password) == "new valid password"
-      assert is_nil(get_change(changeset, :hashed_password))
+    test "validates the current password" do
+      assert %Ecto.Changeset{} = changeset = Accounts.change_user_password(%User{}, "bad")
+      assert %{current_password: ["is not valid"]} = errors_on(changeset)
     end
   end
 
@@ -328,6 +322,21 @@ defmodule MfaExample.AccountsTest do
           context: "session"
         })
       end
+    end
+  end
+
+  describe "validate_user_current_password" do
+    test "returns a user changeset" do
+      assert %Ecto.Changeset{} = changeset = Accounts.validate_user_current_password(%User{}, nil)
+      assert changeset.action == nil
+    end
+
+    test "validates the current password" do
+      assert %Ecto.Changeset{} =
+               changeset = Accounts.validate_user_current_password(%User{}, "bad")
+
+      assert %{current_password: ["is not valid"]} = errors_on(changeset)
+      assert changeset.action == :validate
     end
   end
 
@@ -503,6 +512,124 @@ defmodule MfaExample.AccountsTest do
   describe "inspect/2" do
     test "does not include password" do
       refute inspect(%User{password: "123456"}) =~ "password: \"123456\""
+    end
+  end
+
+  describe "upsert_user_totp/2" do
+    setup do
+      user = user_fixture()
+
+      %{
+        totp: %UserTOTP{user_id: user.id, secret: valid_totp_secret()},
+        user: user
+      }
+    end
+
+    test "validates required otp", %{totp: totp} do
+      {:error, changeset} = Accounts.upsert_user_totp(totp, %{code: ""})
+      assert %{code: ["can't be blank"]} = errors_on(changeset)
+    end
+
+    test "validates otp as 6 digits number", %{totp: totp} do
+      {:error, changeset} = Accounts.upsert_user_totp(totp, %{code: "1234567"})
+      assert %{code: ["should be a 6 digit number"]} = errors_on(changeset)
+    end
+
+    test "validates otp against the secret", %{totp: totp} do
+      {:error, changeset} = Accounts.upsert_user_totp(totp, %{code: "123456"})
+      assert %{code: ["invalid code"]} = errors_on(changeset)
+    end
+
+    test "upserts user's TOTP secret", %{totp: totp} do
+      otp = NimbleTOTP.verification_code(totp.secret)
+
+      assert {:ok, totp} = Accounts.upsert_user_totp(totp, %{code: otp})
+      assert Repo.get!(UserTOTP, totp.id).secret == totp.secret
+
+      new_secret = valid_totp_secret()
+      new_otp = NimbleTOTP.verification_code(new_secret)
+
+      assert {:ok, _} =
+               Accounts.upsert_user_totp(%{totp | secret: new_secret}, %{
+                 code: new_otp
+               })
+    end
+
+    test "generates backup codes if they are missing", %{
+      totp: totp
+    } do
+      otp = NimbleTOTP.verification_code(totp.secret)
+
+      assert {:ok, totp} = Accounts.upsert_user_totp(totp, %{code: otp})
+
+      assert length(totp.backup_codes) == 10
+      assert Enum.all?(totp.backup_codes, &(byte_size(&1.code) == 8))
+      assert Enum.all?(totp.backup_codes, &(:binary.first(&1.code) in ?A..?Z))
+    end
+  end
+
+  describe "delete_user_totp/1" do
+    setup do
+      user = user_fixture()
+
+      %{totp: user_totp_fixture(user), user: user}
+    end
+
+    test "removes otp secret", %{totp: totp} do
+      totp = Accounts.delete_user_totp(totp)
+      refute Repo.get(UserTOTP, totp.id)
+    end
+  end
+
+  describe "regenerate_user_totp_backup_codes/1" do
+    setup do
+      user = user_fixture()
+
+      %{totp: user_totp_fixture(user), user: user}
+    end
+
+    test "replaces backup codes", %{totp: totp} do
+      assert Accounts.regenerate_user_totp_backup_codes(totp).backup_codes !=
+               totp.backup_codes
+    end
+
+    test "does not persist changes made to the struct", %{
+      totp: totp
+    } do
+      changed = %{totp | secret: "SECRET"}
+      assert Accounts.regenerate_user_totp_backup_codes(changed).secret == "SECRET"
+      assert Repo.get(UserTOTP, changed.id).secret == totp.secret
+    end
+  end
+
+  describe "validate_user_totp/2" do
+    setup do
+      user = user_fixture()
+
+      %{totp: user_totp_fixture(user), user: user}
+    end
+
+    test "returns invalid if the code is not valid", %{user: user} do
+      assert Accounts.validate_user_totp(user, "invalid") == :invalid
+      assert Accounts.validate_user_totp(user, nil) == :invalid
+    end
+
+    test "returns valid for valid totp", %{user: user, totp: totp} do
+      code = NimbleTOTP.verification_code(totp.secret)
+      assert Accounts.validate_user_totp(user, code) == :valid_totp
+    end
+
+    test "returns valid for valid backup code", %{
+      user: user,
+      totp: totp
+    } do
+      at = :rand.uniform(10) - 1
+      code = Enum.fetch!(totp.backup_codes, at).code
+      assert Accounts.validate_user_totp(user, code) == {:valid_backup_code, 9}
+      assert Enum.fetch!(Repo.get(UserTOTP, totp.id).backup_codes, at).used_at
+
+      # Cannot reuse the code
+      assert Accounts.validate_user_totp(user, code) == :invalid
     end
   end
 end

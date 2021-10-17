@@ -22,6 +22,7 @@ defmodule MfaExampleWeb.UserRegistrationController do
         conn
         |> put_flash(:info, "User created successfully.")
         |> UserAuth.log_in_user(user)
+        |> UserAuth.redirect_user_after_login_with_remember_me()
 
       {:error, %Ecto.Changeset{} = changeset} ->
         render(conn, "new.html", changeset: changeset)
