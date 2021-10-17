@@ -61,11 +61,33 @@ defmodule MfaExampleWeb.UserSessionControllerTest do
         |> post(Routes.user_session_path(conn, :create), %{
           "user" => %{
             "email" => user.email,
-            "password" => valid_user_password()
+            "password" => valid_user_password(),
+            "remember_me" => "true"
           }
         })
 
       assert redirected_to(conn) == "/foo/bar"
+    end
+
+    test "logs the user but marks totp as pending", %{conn: conn, user: user} do
+      _ = user_totp_fixture(user)
+
+      conn =
+        post(conn, Routes.user_session_path(conn, :create), %{
+          "user" => %{
+            "email" => user.email,
+            "password" => valid_user_password(),
+            "remember_me" => "true"
+          }
+        })
+
+      refute conn.resp_cookies["user_remember_me"]
+      assert get_session(conn, :user_totp_pending)
+      assert redirected_to(conn) == Routes.user_totp_path(conn, :new, user: [remember_me: true])
+
+      # Accesing any page does not work
+      conn = get(conn, "/users/settings")
+      assert redirected_to(conn) == Routes.user_totp_path(conn, :new)
     end
 
     test "emits error message with invalid credentials", %{conn: conn, user: user} do
